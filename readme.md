@@ -15,7 +15,17 @@ sensitivity to degradation (β1) vs track position (β2)
 
 
 Key Findings
-Teamβ1 (Degradation)β2 (Position)AUCMercedes0.0189-0.06610.5244Red Bull Racing0.0214-0.01370.5458Ferrari0.0330-0.23410.6993McLaren0.0365-0.12250.5554Alpine0.0413-0.09940.6184AlphaTauri0.0292-0.07180.5634Aston Martin0.0245-0.02950.5363Williams0.0293-0.14190.5569Alfa Romeo0.0290-0.27970.5721Haas0.0304-0.06500.6055
+Team              β1 (Degradation) β2 (Position)  AUC
+Mercedes            0.0189           -0.06610      .5244
+Red Bull Racing     0.0214           -0.01370      .5458
+Ferrari             0.0330           -0.23410      .6993
+McLaren             0.0365           -0.12250      .5554
+Alpine              0.0413           -0.09940      .6184
+AlphaTauri          0.0292           -0.07180      .5634
+Aston Martin        0.0245           -0.02950      .5363
+Williams            0.0293           -0.14190      .5569
+Alfa Romeo          0.0290           -0.27970      .5721
+Haas                0.0304           -0.06500      .6055
 Notable finding: Max Verstappen is the only driver with a positive β2 (+0.0242)
 and a below-random AUC (0.4966) — quantifying an aggressive strategic personality
 previously documented only anecdotally.
