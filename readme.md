@@ -1,7 +1,4 @@
 F1 Decision DNA
-Extracting Behavioral Decision Coefficients from Formula 1 Pit Stop Data
-Target: MIT Sloan Sports Analytics Conference 2027
-Research Question: What do pit stop decisions reveal about how each F1 team thinks?
 
 Overview
 This pipeline extracts each Formula 1 constructor's implicit pit decision function
@@ -51,6 +48,5 @@ pythonpython f1_decision_dna.py
 Data Source
 All data sourced via FastF1
 
-Author
-Independent researcher
+Author: Ryder, Independent researcher
 MIT Sloan Sports Analytics Conference 2027 submission
