@@ -1,4 +1,4 @@
-CopyF1 Decision DNA
+F1 Decision DNA
 Extracting Behavioral Decision Coefficients from Formula 1 Pit Stop Data
 Target: MIT Sloan Sports Analytics Conference 2027
 Research Question: What do pit stop decisions reveal about how each F1 team thinks?
