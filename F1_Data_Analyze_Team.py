@@ -5,37 +5,36 @@ import pandas as pd
 import numpy as np
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import roc_auc_score
+import statsmodels.api as sm
 import warnings
 warnings.filterwarnings('ignore')
- 
+
 # ─── SETUP ────────────────────────────────────────────────────────────────────
-# Paths work locally AND on Kaggle
 if os.path.exists('/kaggle/working'):
     CACHE_DIR  = '/kaggle/working/f1_cache'
-    EXPORT_DIR = '/kaggle/working/models'
+    EXPORT_DIR = '/kaggle/working/driver_models'
 else:
     CACHE_DIR  = './f1_cache'
-    EXPORT_DIR = './models'
- 
+    EXPORT_DIR = './driver_models'
+
 os.makedirs(CACHE_DIR,  exist_ok=True)
 os.makedirs(EXPORT_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(CACHE_DIR)
- 
- 
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. DATA EXTRACTION & FUEL NORMALIZATION
 # ══════════════════════════════════════════════════════════════════════════════
- 
+
 def load_f1_data(year: int, round_number: int) -> pd.DataFrame:
-    print(f"--> Downloading AWS Data for {year} Round {round_number}...")
+    print(f"--> Loading Round {round_number}...")
     session = fastf1.get_session(year, round_number, 'R')
     session.load(telemetry=False, weather=False)
- 
+
     laps = session.laps
     laps['LapTime_s'] = laps['LapTime'].dt.total_seconds()
- 
+
     df = laps[[
         'Driver', 'Team', 'LapNumber', 'LapTime_s',
         'Stint', 'Compound', 'TyreLife', 'Position',
@@ -43,253 +42,181 @@ def load_f1_data(year: int, round_number: int) -> pd.DataFrame:
     ]].copy()
     df = df.rename(columns={'Driver': 'DriverId'})
     df['Round'] = round_number
- 
-    # Flag pit laps before any filtering
+
     df['IsPitLap'] = ~df['PitInTime'].isnull()
- 
-    # Target: did this driver pit on the NEXT lap?
     df = df.sort_values(['DriverId', 'LapNumber'])
     df['Did_Pit'] = (
         df.groupby('DriverId')['IsPitLap']
           .shift(-1).fillna(False).astype(int)
     )
- 
-    # Fuel correction (~0.03s per kg, 110kg start)
+
     total_laps = df['LapNumber'].max()
     df['FuelRemaining_kg'] = 110.0 * (1.0 - (df['LapNumber'] / total_laps))
     df['NormalizedPace_s'] = df['LapTime_s'] - (df['FuelRemaining_kg'] * 0.03)
- 
+
     return df
- 
- 
+
+
 # ══════════════════════════════════════════════════════════════════════════════
-# 2. GLOBAL ANOMALY FILTERING (Option 1 + Option 3)
+# 2. GLOBAL ANOMALY FILTERING
 # ══════════════════════════════════════════════════════════════════════════════
- 
+
 def filter_global_anomalies(df: pd.DataFrame, threshold: float = 0.65) -> pd.DataFrame:
-    """
-    Fleet-wide residual anomaly detection.
-    If >65% of drivers show anomalous pace on the same lap,
-    it's a track condition (SC/VSC/yellow), not individual deg.
-    """
     racing_laps = df[df['IsAccurate'] == True].copy()
     if racing_laps.empty:
         return df
- 
+
     fleet_medians = racing_laps.groupby('LapNumber')['NormalizedPace_s'].transform('median')
     racing_laps['DeltaToFleet'] = racing_laps['NormalizedPace_s'] - fleet_medians
- 
+
     anomalous_laps = racing_laps.groupby('LapNumber').filter(
         lambda x: (x['DeltaToFleet'] > 1.5).mean() > threshold
     )['LapNumber'].unique()
- 
+
     return df[~df['LapNumber'].isin(anomalous_laps)].copy()
- 
- 
+
+
 # ══════════════════════════════════════════════════════════════════════════════
-# 3. TEAM PIPELINE: GMM + LOGISTIC REGRESSION + EXPORT
+# 3. DRIVER DNA PIPELINE
 # ══════════════════════════════════════════════════════════════════════════════
- 
-def process_team(train_df: pd.DataFrame,
-                 test_df: pd.DataFrame,
-                 target_team: str,
-                 driver_level: bool = False):
-    """
-    Full pipeline for one team:
-      Stage A - Physics engine: StandardScaler + GMM on TyreLife/NormalizedPace
-      Stage B - Behavioral data prep: DegradationPercent per stint
-      Stage C - Decision DNA: LogisticRegression on Degradation + Position
-      Stage D - Export models as .joblib files
-      Stage E - Evaluate + print results
- 
-    If driver_level=True, also splits by individual driver to test
-    the bimodality hypothesis (HAM vs BOT, VER vs PER).
-    """
-    print(f"\n{'='*70}")
-    print(f" PIPELINE: {target_team.upper()}")
-    print(f"{'='*70}")
- 
-    team_train = train_df[train_df['Team'] == target_team].copy()
-    team_test  = test_df[test_df['Team']  == target_team].copy()
- 
-    # ── Stage A: Physics Engine ───────────────────────────────────────────────
+
+def process_driver(train_df: pd.DataFrame,
+                   test_df: pd.DataFrame,
+                   driver_id: str,
+                   team_name: str) -> dict:
+    
+    # ── Stage A: Team Physics Engine (GMM) ───────────────────────────────────
+    team_train = train_df[train_df['Team'] == team_name]
+
     train_racing = team_train[
         (team_train['IsAccurate'] == True) &
         (~team_train['IsPitLap'])
     ].dropna(subset=['NormalizedPace_s'])
- 
+
     if len(train_racing) < 50:
-        print(f"  Skipping: insufficient data ({len(train_racing)} laps)")
-        return
- 
+        return None
+
     scaler = StandardScaler()
-    X_phys_train = train_racing[['TyreLife', 'NormalizedPace_s']]
-    X_scaled     = scaler.fit_transform(X_phys_train)
- 
+    X_scaled = scaler.fit_transform(train_racing[['TyreLife', 'NormalizedPace_s']])
+
     gmm = GaussianMixture(n_components=3, covariance_type='full', random_state=42)
     gmm.fit(X_scaled)
- 
-    # Identify cliff regime = component with highest mean NormalizedPace_s
+
     train_racing = train_racing.copy()
     train_racing['Regime'] = gmm.predict(X_scaled)
-    regime_paces  = train_racing.groupby('Regime')['NormalizedPace_s'].mean()
-    cliff_regime  = regime_paces.idxmax()
- 
-    # ── Stage B: Behavioral Data Prep ─────────────────────────────────────────
-    def prepare_behavioral(df: pd.DataFrame) -> pd.DataFrame:
-        racing = df[
-            (df['IsAccurate'] == True) &
-            (~df['IsPitLap'])
+    regime_paces = train_racing.groupby('Regime')['NormalizedPace_s'].mean()
+    cliff_regime = regime_paces.idxmax()
+
+    # ── Stage B: Driver-Specific Behavioral Data ──────────────────────────────
+    def prepare_driver_behavioral(df: pd.DataFrame, driver: str) -> pd.DataFrame:
+        driver_df = df[df['DriverId'] == driver].copy()
+        racing = driver_df[
+            (driver_df['IsAccurate'] == True) &
+            (~driver_df['IsPitLap'])
         ].dropna(subset=['NormalizedPace_s']).copy()
- 
+
         if racing.empty:
             return pd.DataFrame()
- 
-        # Apply pre-trained scaler + GMM
+
         racing['Regime'] = gmm.predict(
             scaler.transform(racing[['TyreLife', 'NormalizedPace_s']])
         )
- 
-        # Baseline pace per stint = mean pace of non-cliff laps
+
         baselines = []
-        for (driver, stint), group in racing.groupby(['DriverId', 'Stint']):
+        for (d, stint), group in racing.groupby(['DriverId', 'Stint']):
             non_cliff = group[group['Regime'] != cliff_regime]
             base = (non_cliff['NormalizedPace_s'].mean()
                     if not non_cliff.empty
                     else group['NormalizedPace_s'].mean())
             baselines.append({
-                'DriverId':    driver,
+                'DriverId':    d,
                 'Stint':       stint,
                 'BaselinePace': base
             })
- 
+
         baseline_df = pd.DataFrame(baselines)
         if baseline_df.empty:
             return pd.DataFrame()
- 
-        merged = df.merge(baseline_df, on=['DriverId', 'Stint'], how='left')
+
+        merged = driver_df.merge(baseline_df, on=['DriverId', 'Stint'], how='left')
         merged = merged.dropna(subset=['BaselinePace', 'NormalizedPace_s'])
         merged['DegradationPercent'] = (
             (merged['NormalizedPace_s'] - merged['BaselinePace'])
             / merged['BaselinePace'] * 100
         )
- 
+
         return merged[[
             'Round', 'DriverId', 'LapNumber',
             'DegradationPercent', 'Position', 'Did_Pit'
         ]].dropna()
- 
-    train_beh = prepare_behavioral(team_train)
-    test_beh  = prepare_behavioral(team_test)
- 
+
+    train_beh = prepare_driver_behavioral(train_df, driver_id)
+    test_beh  = prepare_driver_behavioral(test_df,  driver_id)
+
     if (len(train_beh[train_beh['Did_Pit'] == 1]) < 3 or
             len(test_beh[test_beh['Did_Pit'] == 1]) < 1):
-        print(f"  Skipping: insufficient pit examples in train/test")
-        return
- 
-    # ── Stage C: Decision DNA (Team Level) ────────────────────────────────────
-    def fit_and_evaluate(X_tr, y_tr, X_te, y_te, label):
-        clf = LogisticRegression(class_weight='balanced', random_state=42)
-        clf.fit(X_tr, y_tr)
-        preds = clf.predict(X_te)
-        probs = clf.predict_proba(X_te)[:, 1]
-        acc   = accuracy_score(y_te, preds)
-        try:
-            auc = roc_auc_score(y_te, probs)
-        except ValueError:
-            auc = np.nan
- 
-        print(f"\n  [{label}]")
-        print(f"  Train rows: {len(X_tr)} (pits: {y_tr.sum()})")
-        print(f"  Test rows:  {len(X_te)} (pits: {y_te.sum()})")
-        print(f"  B1 Degradation Sensitivity : {round(clf.coef_[0][0], 4)}")
-        print(f"  B2 Position Sensitivity    : {round(clf.coef_[0][1], 4)}")
-        print(f"  B0 Intercept               : {round(clf.intercept_[0], 4)}")
-        print(f"  Accuracy                   : {round(acc * 100, 2)}%")
-        print(f"  ROC-AUC                    : {round(auc, 4) if not np.isnan(auc) else 'N/A'}")
-        return clf, auc
- 
+        return None
+
+    # ── Stage C: Fit Driver Decision DNA (Statsmodels) ───────────────────────
     X_tr = train_beh[['DegradationPercent', 'Position']]
     y_tr = train_beh['Did_Pit']
     X_te = test_beh[['DegradationPercent', 'Position']]
     y_te = test_beh['Did_Pit']
- 
-    team_clf, team_auc = fit_and_evaluate(X_tr, y_tr, X_te, y_te,
-                                          label=f"{target_team} TEAM LEVEL")
- 
-    # ── Stage D: Export models ────────────────────────────────────────────────
-    name = target_team.replace(" ", "_").lower()
-    scaler_path = os.path.join(EXPORT_DIR, f"{name}_scaler.joblib")
-    gmm_path    = os.path.join(EXPORT_DIR, f"{name}_gmm.joblib")
-    clf_path    = os.path.join(EXPORT_DIR, f"{name}_behavior.joblib")
- 
-    joblib.dump(scaler,   scaler_path)
-    joblib.dump(gmm,      gmm_path)
-    joblib.dump(team_clf, clf_path)
- 
-    print(f"\n  Exported:")
-    print(f"    {scaler_path}")
-    print(f"    {gmm_path}")
-    print(f"    {clf_path}")
- 
-    # ── Stage E: Driver-Level Split (Bimodality Hypothesis Test) ─────────────
-    if driver_level:
-        print(f"\n  --- BIMODALITY HYPOTHESIS TEST: {target_team} ---")
- 
-        drivers = train_beh['DriverId'].unique()
-        driver_aucs = {}
- 
-        for driver in drivers:
-            d_tr = train_beh[train_beh['DriverId'] == driver]
-            d_te = test_beh[test_beh['DriverId']   == driver]
- 
-            if (len(d_tr[d_tr['Did_Pit'] == 1]) < 3 or
-                    len(d_te[d_te['Did_Pit'] == 1]) < 1):
-                print(f"\n  [{driver}] insufficient data, skipping")
-                continue
- 
-            _, d_auc = fit_and_evaluate(
-                d_tr[['DegradationPercent', 'Position']], d_tr['Did_Pit'],
-                d_te[['DegradationPercent', 'Position']], d_te['Did_Pit'],
-                label=f"{driver} DRIVER LEVEL"
-            )
-            driver_aucs[driver] = d_auc
- 
-        if len(driver_aucs) == 2:
-            drivers_list = list(driver_aucs.keys())
-            auc_a = driver_aucs[drivers_list[0]]
-            auc_b = driver_aucs[drivers_list[1]]
-            delta = abs(auc_a - auc_b) if not (np.isnan(auc_a) or np.isnan(auc_b)) else np.nan
- 
-            print(f"\n  INTERPRETATION:")
-            print(f"  Team AUC         : {round(team_auc, 4)}")
-            print(f"  {drivers_list[0]} AUC : {round(auc_a, 4) if not np.isnan(auc_a) else 'N/A'}")
-            print(f"  {drivers_list[1]} AUC : {round(auc_b, 4) if not np.isnan(auc_b) else 'N/A'}")
- 
-            if not np.isnan(delta):
-                if delta > 0.10:
-                    print(f"  >> BIMODALITY CONFIRMED (delta={round(delta,4)})")
-                    print(f"     Low team AUC explained by contradictory driver strategies.")
-                else:
-                    print(f"  >> INFORMATION ASYMMETRY CONFIRMED (delta={round(delta,4)})")
-                    print(f"     Both drivers individually unpredictable from public data.")
- 
- 
+
+    # Statsmodels requires explicit intercept
+    X_tr_sm = sm.add_constant(X_tr)
+    X_te_sm = sm.add_constant(X_te)
+
+    try:
+        logit_model = sm.Logit(y_tr, X_tr_sm)
+        # using bfgs to handle potential perfect separation in rare events
+        clf = logit_model.fit(method='bfgs', disp=0) 
+        
+        b0 = clf.params.get('const', 0)
+        b1 = clf.params.get('DegradationPercent', 0)
+        b2 = clf.params.get('Position', 0)
+        
+        p_b1 = clf.pvalues.get('DegradationPercent', 1.0)
+        p_b2 = clf.pvalues.get('Position', 1.0)
+        
+        probs = clf.predict(X_te_sm)
+        auc = roc_auc_score(y_te, probs)
+        
+    except Exception as e:
+        print(f"  Failed to converge for {driver_id}: {e}")
+        return None
+
+    # ── Stage D: Export driver model ──────────────────────────────────────────
+    clf_path = os.path.join(EXPORT_DIR, f"{driver_id.lower()}_behavior.joblib")
+    joblib.dump(clf, clf_path)
+
+    return {
+        'Driver':         driver_id,
+        'Team':           team_name,
+        'B1_Degradation': round(b1, 4),
+        'P_Value_B1':     round(p_b1, 4),
+        'B2_Position':    round(b2, 4),
+        'P_Value_B2':     round(p_b2, 4),
+        'B0_Intercept':   round(b0, 4),
+        'AUC':            round(auc, 4) if not np.isnan(auc) else None,
+        'Train_Pits':     int(y_tr.sum()),
+        'Test_Pits':      int(y_te.sum()),
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 4. MASTER EXECUTION
 # ══════════════════════════════════════════════════════════════════════════════
- 
+
 if __name__ == '__main__':
     YEAR         = 2021
     TOTAL_ROUNDS = 22
     SPLIT_ROUND  = int(TOTAL_ROUNDS * 0.60)
- 
+
     train_rounds = list(range(1, SPLIT_ROUND + 1))
     test_rounds  = list(range(SPLIT_ROUND + 1, TOTAL_ROUNDS + 1))
- 
-    print(f"Training on rounds  : {train_rounds}")
-    print(f"Testing on rounds   : {test_rounds}")
- 
+
+    # ── Load full season ──────────────────────────────────────────────────────
     all_data = []
     for rnd in range(1, TOTAL_ROUNDS + 1):
         try:
@@ -298,35 +225,86 @@ if __name__ == '__main__':
             all_data.append(clean)
         except Exception as e:
             print(f"  Skipping round {rnd}: {e}")
- 
+
     if not all_data:
         print("CRITICAL ERROR: No data loaded.")
         exit()
- 
+
     full_df  = pd.concat(all_data, ignore_index=True)
     train_df = full_df[full_df['Round'].isin(train_rounds)]
     test_df  = full_df[full_df['Round'].isin(test_rounds)]
- 
+
     print(f"\nFull season loaded: {len(full_df):,} laps")
-    print(f"Train: {len(train_df):,} laps  |  Test: {len(test_df):,} laps")
- 
-    # Run all 10 teams
-    all_teams = [
-        'Mercedes', 'Red Bull Racing', 'Ferrari', 'McLaren',
-        'Alpine', 'AlphaTauri', 'Aston Martin', 'Williams',
-        'Alfa Romeo Racing', 'Haas F1 Team'
-    ]
-    for team in all_teams:
-        process_team(train_df, test_df, team, driver_level=False)
- 
-    # Bimodality hypothesis test for top 2 teams
-    print(f"\n{'#'*70}")
-    print(f"# BIMODALITY HYPOTHESIS TEST")
-    print(f"{'#'*70}")
-    for team in ['Mercedes', 'Red Bull Racing']:
-        process_team(train_df, test_df, team, driver_level=True)
- 
-    print(f"\n{'='*70}")
+
+    # ── Get all driver-team pairs ─────────────────────────────────────────────
+    driver_team_map = (
+        full_df.groupby('DriverId')['Team']
+               .agg(lambda x: x.value_counts().index[0])
+               .reset_index()
+               .values.tolist()
+    )
+
+    # ── Run driver pipeline ───────────────────────────────────────────────────
+    print(f"\n{'='*85}")
+    print(f" EXTRACTING DRIVER DNA — ALL 20 DRIVERS")
+    print(f"{'='*85}")
+
+    results = []
+    for driver_id, team_name in driver_team_map:
+        print(f"\n  Processing {driver_id} ({team_name})...")
+        result = process_driver(train_df, test_df, driver_id, team_name)
+        if result:
+            results.append(result)
+            print(f"  B1: {result['B1_Degradation']} (p={result['P_Value_B1']})  "
+                  f"B2: {result['B2_Position']} (p={result['P_Value_B2']})  "
+                  f"AUC: {result['AUC']}")
+        else:
+            print(f"  Skipped — insufficient data")
+
+    # ── Results table ─────────────────────────────────────────────────────────
+    results_df = pd.DataFrame(results)
+    results_df = results_df.sort_values('AUC', ascending=True)
+
+    print(f"\n{'='*85}")
+    print(f" DRIVER DECISION DNA — FULL GRID RESULTS (WITH P-VALUES)")
+    print(f"{'='*85}")
+    print(f"\n{'Driver':<6} {'Team':<20} {'B1':>8} {'P(B1)':>8} {'B2':>8} {'P(B2)':>8} {'AUC':>8}")
+    print(f"{'-'*75}")
+    for _, row in results_df.iterrows():
+        print(f"{row['Driver']:<6} {row['Team']:<20} "
+              f"{row['B1_Degradation']:>8.4f} "
+              f"{row['P_Value_B1']:>8.4f} "
+              f"{row['B2_Position']:>8.4f} "
+              f"{row['P_Value_B2']:>8.4f} "
+              f"{str(row['AUC']):>8}")
+
+    # ── Save results to CSV ───────────────────────────────────────────────────
+    csv_path = os.path.join(EXPORT_DIR, 'driver_dna_results.csv')
+    results_df.to_csv(csv_path, index=False)
+    print(f"\nResults saved to: {csv_path}")
+
+    # ── Flag anomalies ────────────────────────────────────────────────────────
+    print(f"\n{'='*85}")
+    print(f" ANOMALY DETECTION")
+    print(f"{'='*85}")
+
+    # Below random AUC
+    below_random = results_df[results_df['AUC'] < 0.50]
+    if not below_random.empty:
+        print(f"\nDrivers with below-random AUC (< 0.50):")
+        for _, row in below_random.iterrows():
+            print(f"  {row['Driver']} ({row['Team']}) — AUC: {row['AUC']}")
+
+    # Positive B2 AND Statistically Significant (p < 0.05)
+    sig_positive_b2 = results_df[(results_df['B2_Position'] > 0) & (results_df['P_Value_B2'] < 0.05)]
+    if not sig_positive_b2.empty:
+        print(f"\nDrivers with PROVEN positive B2 (aggressive under pressure, p < 0.05):")
+        for _, row in sig_positive_b2.iterrows():
+            print(f"  {row['Driver']} ({row['Team']}) — B2: {row['B2_Position']} (p={row['P_Value_B2']})")
+    elif not results_df[results_df['B2_Position'] > 0].empty:
+        print(f"\nNOTE: Some drivers had a positive B2, but the p-value was > 0.05, meaning it lacks statistical proof.")
+
+    print(f"\n{'='*85}")
     print(f" PIPELINE COMPLETE")
     print(f" Models exported to: {EXPORT_DIR}")
-    print(f"{'='*70}")
+    print(f"{'='*85}")
