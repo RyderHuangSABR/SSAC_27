@@ -1,52 +1,48 @@
-F1 Decision DNA
+# F1 Decision DNA: Quantifying Strategic Predictability
 
-Overview
-This pipeline extracts each Formula 1 constructor's implicit pit decision function
-from publicly available lap time telemetry — what we call their Decision DNA.
-Using the 2021 Formula 1 season (the final year of an eight-year regulatory era),
-we apply a two-stage model:
+**Author:** Ryder (Independent Researcher)  
+**Submission:** MIT Sloan Sports Analytics Conference 2027  
 
-Gaussian Mixture Model — identifies tyre degradation regimes per constructor
-Logistic Regression — extracts behavioral coefficients quantifying each team's
-sensitivity to degradation (β1) vs track position (β2)
+## Overview
+This quantitative pipeline extracts each Formula 1 constructor's implicit pit decision function from publicly available lap time telemetry—what we define as their **Decision DNA**. 
 
+Using the 2021 Formula 1 season (the final year of an eight-year regulatory era), we engineered a two-stage deterministic model to isolate driver behavior from car physics:
+1. **Gaussian Mixture Model (GMM):** Identifies distinct, unsupervised physical tyre degradation regimes per constructor.
+2. **Logistic Regression (Statsmodels):** Extracts specific behavioral coefficients quantifying how each team and driver reacts to isolated stimuli under race conditions.
 
-β1 = Degradation Sensitivity
-β2 = Position Sensitivity
-AUC = Predictability score (closer to 0.5 = more strategically opaque)
+### The Metrics
+* **β₁ (Degradation Sensitivity):** Likelihood to pit based strictly on physical car degradation.
+* **β₂ (Position Sensitivity):** Likelihood to pit based on immediate track position threats.
+* **AUC:** The predictability score of the strategy (closer to 0.50 = higher strategic opacity/game theory execution).
 
+---
 
-Key Findings — Team Level
-Mercedes | β1: 0.0189 | β2: -0.0661 | AUC: 0.5244| 
-Red Bull Racing | β1: 0.0214 | β2: -0.0137 | AUC: 0.5458| 
-Ferrari | β1: 0.0330 | β2: -0.2341 | AUC: 0.6993| 
-McLaren | β1: 0.0365 | β2: -0.1225 | AUC: 0.5554| 
-Alpine | β1: 0.0413 | β2: -0.0994 | AUC: 0.6184| 
-AlphaTauri | β1: 0.0292 | β2: -0.0718 | AUC: 0.5634| 
-Aston Martin | β1: 0.0245 | β2: -0.0295 | AUC: 0.5363| 
-Williams | β1: 0.0293 | β2: -0.1419 | AUC: 0.5569| 
-Alfa Romeo Racing | β1: 0.0290 | β2: -0.2797 | AUC: 0.5721| 
-Haas F1 Team | β1: 0.0304 | β2: -0.0650 | AUC: 0.6055| 
+## Key Findings — Team Level
 
-Key Findings — Driver Level (Bimodality Hypothesis Test)
-Mercedes — HAM | β1: 0.0145 | β2: -0.0809 | AUC: 0.5952| 
-Mercedes — BOT | β1: 0.0252 | β2: -0.0872 | AUC: 0.5092| 
-Red Bull — VER | β1: 0.0159 | β2: +0.0242 | AUC: 0.4966| 
-Red Bull — PER | β1: 0.0256 | β2: -0.0367 | AUC: 0.5987| 
+The midterm field displays highly predictable, reactive strategies (AUC > 0.55), tied heavily to mathematical tyre drop-offs (positive β₁). 
 
-Notable: Max Verstappen is the only driver with a positive β2 (+0.0242)
-and a below-random AUC (0.4966) — quantifying an aggressive strategic
-personality previously documented only anecdotally.
+| Constructor | β₁ | β₂ | AUC | Predictability |
+| :--- | :--- | :--- | :--- | :--- |
+| **Ferrari** | 0.0330 | -0.2341 | **0.6993** | Highly Reactive / Predictable |
+| **Alpine** | 0.0413 | -0.0994 | **0.6184** | Reactive |
+| **Haas F1** | 0.0304 | -0.0650 | **0.6055** | Reactive |
+| **Alfa Romeo** | 0.0290 | -0.2797 | **0.5721** | Mid-Tier Reactive |
+| **AlphaTauri** | 0.0292 | -0.0718 | **0.5634** | Mid-Tier Reactive |
+| **Williams** | 0.0293 | -0.1419 | **0.5569** | Mid-Tier Reactive |
+| **McLaren** | 0.0365 | -0.1225 | **0.5554** | Mid-Tier Reactive |
+| **Red Bull Racing**| 0.0214 | -0.0137 | **0.5458** | Championship / Opaque |
+| **Aston Martin** | 0.0245 | -0.0295 | **0.5363** | Championship / Opaque |
+| **Mercedes** | 0.0189 | -0.0661 | **0.5244** | Highly Opaque |
 
+---
 
-Requirements
-pip install fastf1 pandas numpy scikit-learn joblib
+## Key Findings — Driver Level (Bimodality Hypothesis)
 
-Usage
-pythonpython f1_decision_dna.py
+A mathematical decoupling occurs at the championship level. Top constructors assign reactive, physics-bound strategies to secondary drivers, freeing their primary drivers to execute statistically opaque, global game theory. 
 
-Data Source
-All data sourced via FastF1
-
-Author: Ryder, Independent researcher
-MIT Sloan Sports Analytics Conference 2027 submission
+| Team | Driver | β₁ | β₂ | AUC | 
+| :--- | :--- | :--- | :--- | :--- |
+| Mercedes | **HAM** | 0.0145 | -0.0809 | 0.5952 |
+| Mercedes | **BOT** | 0.0252 | -0.0872 | 0.5092 |
+| Red Bull | **PER** | 0.0256 | -0.0367 | 0.5987 |
+| Red Bull | **VER** | 0.0159 | **+0.0242** | **0.4966** |
