@@ -1,0 +1,32 @@
+# ─── FastF1 & Pipeline Data ─────────────────
+# Ignore the massive telemetry cache
+f1_cache/
+
+# Ignore binary model exports
+driver_models/
+*.joblib
+
+# ─── Python Environment ─────────────────────
+# Ignore virtual environments
+venv/
+.venv/
+env/
+
+# Ignore compiled Python files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ─── OS & Editor Files ──────────────────────
+# Mac OS folder attributes
+.DS_Store
+
+# Windows thumbnail cache
+Thumbs.db
+
+# VS Code / PyCharm settings
+.vscode/
+.idea/
+
+# Jupyter Notebook checkpoints (if you use them)
+.ipynb_checkpoints/
