@@ -31,8 +31,8 @@ The midterm field displays highly predictable, reactive strategies (AUC > 0.55),
 | **Williams** | 0.0293 | -0.1419 | **0.5569** | Mid-Tier Reactive |
 | **McLaren** | 0.0365 | -0.1225 | **0.5554** | Mid-Tier Reactive |
 | **Red Bull Racing**| 0.0214 | -0.0137 | **0.5458** | Championship / Opaque |
-| **Aston Martin** | 0.0245 | -0.0295 | **0.5363** | Championship / Opaque |
-| **Mercedes** | 0.0189 | -0.0661 | **0.5244** | Highly Opaque |
+| **Aston Martin** | 0.0245 | -0.0295 | **0.5363** | Opaque |
+| **Mercedes** | 0.0189 | -0.0661 | **0.5244** | Championship / Highly Opaque |
 
 ---
 
