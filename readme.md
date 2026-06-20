@@ -15,19 +15,6 @@ Using the 2021 Formula 1 season (the final year of an eight-year regulatory era)
 
 ---
 
-## Key Findings: The Bimodality Hypothesis
-
-A mathematical decoupling occurs at the championship level. Top constructors assign reactive, physics-bound strategies to secondary drivers (highly significant P-values), freeing their primary drivers to execute statistically opaque, global game-theoretic strategies independent of local track variables.
-
-| Team | Driver | β₁ | P(β₁) | β₂ | P(β₂) | AUC |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Mercedes** | HAM | 0.0128 | 0.0851 | -0.1124 | 0.3180 | **0.6071** |
-| **Mercedes** | BOT | 0.0174 | 0.0412 | -0.0665 | 0.4894 | **0.5158** |
-| **Red Bull** | PER | 0.0207 | 0.0170 | -0.0334 | 0.5204 | **0.6017** |
-| **Red Bull** | VER | 0.0123 | 0.1294 | 0.0343 | 0.6236 | **0.4885** |
-
----
-
 ## Complete 2021 Grid: Decision DNA Signatures
 
 The full grid reveals a clear spectrum of strategic behavior, ranging from the highly opaque championship contenders (AUC < 0.52) to the highly predictable, reactive profiles of Ferrari and Haas (AUC > 0.65). 
