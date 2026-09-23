@@ -1,8 +1,8 @@
 # F1 Decision DNA: Quantifying Pit Stop Strategy
 
-This quantitative pipeline extracts each Formula 1 constructor's implicit pit decision function from publicly available lap time telemetry—what we define as their **Decision DNA**.
+This quantitative pipeline extracts each Formula 1 constructor's implicit pit decision function from publicly available lap time telemetry—which is define as their **Decision DNA**.
 
-Using the 2021 Formula 1 season (the final year of an eight-year regulatory era), we engineered a two-stage deterministic model to isolate driver behavior from car physics.
+Using the 2021 Formula 1 season (the final year of an eight-year era), we engineered a two-stage deterministic model to isolate driver behavior from car physics.
 
 ## Methodology
 * **Gaussian Mixture Model (GMM):** Identifies distinct, unsupervised physical tyre degradation regimes per constructor.
